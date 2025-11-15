@@ -306,7 +306,12 @@ class MotionEventRetriever:
             timestamp = datetime.now()
 
             # Check if motion state changed
-            motion_now = self.host_obj.motion_detected(channel)
+            try:
+                motion_now = self.host_obj.motion_detected(channel)
+            except Exception as e:
+                _LOGGER.error(f"Error checking motion state: {e}")
+                return
+
             was_motion = self.last_motion_state.get(channel, False)
 
             if motion_now and not was_motion:
@@ -362,6 +367,7 @@ class MotionEventRetriever:
             touchfile_interval = self.touchfile_check_interval if self.touchfile_enabled else check_interval
             next_touchfile_check = 0
             next_status_log = check_interval
+            next_motion_poll = 10  # Check motion state every 10 seconds
 
             while infinite_mode or elapsed < duration_seconds:
                 # Sleep in small increments to allow responsive touchfile checking
@@ -379,8 +385,12 @@ class MotionEventRetriever:
 
                 # Manually check motion state to catch missed callbacks
                 # This handles cases where the Baichuan callback doesn't fire for motion end
-                if int(elapsed) % 10 == 0:  # Check every 10 seconds
-                    event_callback()
+                if elapsed >= next_motion_poll:
+                    try:
+                        event_callback()
+                    except Exception as e:
+                        _LOGGER.error(f"Error in motion poll callback: {e}")
+                    next_motion_poll = elapsed + 10  # Next check in 10 seconds
 
                 # Log progress at regular intervals
                 if elapsed >= next_status_log:
