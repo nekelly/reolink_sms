@@ -398,16 +398,20 @@ class MotionEventRetriever:
 
         def event_callback():
             """Called when any event occurs"""
+            _LOGGER.debug("event_callback() called")
             timestamp = datetime.now()
 
             # Check if motion state changed
             try:
+                _LOGGER.debug("Checking motion_detected()...")
                 motion_now = self.host_obj.motion_detected(channel)
+                _LOGGER.debug(f"motion_detected() returned: {motion_now}")
             except Exception as e:
                 _LOGGER.error(f"Error checking motion state: {e}")
                 return
 
             was_motion = self.last_motion_state.get(channel, False)
+            _LOGGER.debug(f"Motion state: was={was_motion}, now={motion_now}")
 
             if motion_now and not was_motion:
                 _LOGGER.info(f"[{timestamp}] ⚡ MOTION STARTED on channel {channel}")
@@ -440,6 +444,7 @@ class MotionEventRetriever:
                 })
 
             self.last_motion_state[channel] = motion_now
+            _LOGGER.debug("event_callback() completed")
 
         # Register callback
         self.host_obj.baichuan.register_callback("motion_monitor", event_callback)
@@ -644,6 +649,22 @@ async def main():
     """Main function"""
     # Load configuration
     config = load_env()
+
+    # Configure logging level from config
+    log_level_str = get_config_value(config, 'LOG_LEVEL', 'INFO', str).upper()
+    level_map = {
+        'DEBUG': logging.DEBUG,
+        'INFO': logging.INFO,
+        'WARNING': logging.WARNING,
+        'ERROR': logging.ERROR,
+        'CRITICAL': logging.CRITICAL
+    }
+    if log_level_str in level_map:
+        logging.getLogger().setLevel(level_map[log_level_str])
+        _LOGGER.setLevel(level_map[log_level_str])
+        _LOGGER.info(f"Log level set to: {log_level_str}")
+    else:
+        _LOGGER.warning(f"Invalid LOG_LEVEL '{log_level_str}', using INFO")
 
     # Parse configuration
     host = get_config_value(config, 'CAMERA_HOST', '192.168.1.10')
