@@ -12,11 +12,11 @@ RUN apt-get update && \
 # Copy the parent directory (reolink_aio package) into the container
 COPY .. /app
 
-# Install Python dependencies
+# Install Python dependencies (core library)
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install optional Twilio for SMS notifications
-RUN pip install --no-cache-dir twilio
+# Install example dependencies (includes Twilio for SMS)
+RUN pip install --no-cache-dir -r examples/requirements.txt
 
 # Create recordings directory
 RUN mkdir -p /app/examples/recordings
