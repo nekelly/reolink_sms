@@ -12,6 +12,7 @@ import asyncio
 import logging
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 from time import time as get_time
@@ -243,6 +244,21 @@ class MotionEventRetriever:
 
             return False
 
+    async def send_sms_async(self, message: str, force: bool = False):
+        """Async wrapper for send_sms to avoid blocking the event loop"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.send_sms, message, force)
+
+    async def _send_motion_sms(self, message: str):
+        """Helper to send motion detection SMS without blocking"""
+        try:
+            if await self.send_sms_async(message):
+                _LOGGER.info(f"📱 SMS alert sent to {self.twilio_to}")
+            else:
+                _LOGGER.debug("SMS not sent (cooldown active or failed)")
+        except Exception as e:
+            _LOGGER.error(f"Error sending motion SMS: {e}")
+
     async def check_touchfile(self):
         """Check for touchfile and send SMS if found"""
         if not self.touchfile_enabled or not self.touchfile_path:
@@ -264,7 +280,7 @@ class MotionEventRetriever:
                     message = f"🔔 Manual alert triggered at {datetime.now().strftime('%H:%M:%S')}"
 
                 # Send SMS (force=True to bypass cooldown for manual triggers)
-                if self.send_sms(message, force=True):
+                if await self.send_sms_async(message, force=True):
                     _LOGGER.info(f"📱 Touchfile SMS sent to {self.twilio_to}")
                 else:
                     _LOGGER.warning("Failed to send touchfile SMS")
@@ -314,7 +330,7 @@ class MotionEventRetriever:
                     f"{free_gb:.1f}GB free remaining"
                 )
 
-                if self.send_sms(message, force=False):
+                if await self.send_sms_async(message, force=False):
                     _LOGGER.warning(f"Disk space alert sent: {percent_used:.1f}% used on {self.disk_monitor_path}")
                     self.last_disk_alert_time = current_time
                 else:
@@ -423,17 +439,18 @@ class MotionEventRetriever:
 
                 # Send SMS notification if enabled
                 if self.sms_on_motion:
-                    _LOGGER.info("Start Calling camera_name() ...")
+                    _LOGGER.debug("Preparing SMS alert...")
                     camera_name = self.host_obj.camera_name(channel)
-                    _LOGGER.info("End Calling camera_name()")
+                    _LOGGER.debug(f"Camera name: {camera_name}")
 
                     sms_message = (
                         f"🚨 Motion detected on {camera_name} at {timestamp.strftime('%H:%M:%S')}"
                     )
-                    if self.send_sms(sms_message):
-                        _LOGGER.info(f"📱 SMS alert sent to {self.twilio_to}")
-                    else:
-                        _LOGGER.debug("SMS not sent (cooldown active or failed)")
+
+                    # Schedule async SMS send as a task to avoid blocking
+                    _LOGGER.debug("Scheduling SMS send task...")
+                    asyncio.create_task(self._send_motion_sms(sms_message))
+                    _LOGGER.debug("SMS task scheduled")
 
             elif not motion_now and was_motion:
                 _LOGGER.info(f"[{timestamp}] ✓ MOTION ENDED on channel {channel}")
