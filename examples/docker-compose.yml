@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  reolink-motion-monitor:
+    build:
+      context: ..
+      dockerfile: examples/Dockerfile
+    container_name: reolink-motion-monitor
+    restart: unless-stopped
+
+    # Environment variables from .env file
+    env_file:
+      - .env
+
+    # Mount recordings directory to persist downloads
+    volumes:
+      - ./recordings:/app/examples/recordings
+
+    # Network mode: host allows direct access to camera on local network
+    # Alternative: Use bridge mode and specify camera IP
+    network_mode: host
+
+    # Optional: Resource limits
+    # deploy:
+    #   resources:
+    #     limits:
+    #       cpus: '0.5'
+    #       memory: 256M
+    #     reservations:
+    #       cpus: '0.25'
+    #       memory: 128M

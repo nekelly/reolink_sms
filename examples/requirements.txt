@@ -1,0 +1,13 @@
+# Core Reolink library dependencies
+# Install with: pip install -r requirements.txt
+
+# Required for the reolink_aio library
+aiohttp
+aiortsp
+orjson
+pycryptodomex
+typing_extensions
+
+# Optional: Twilio for SMS notifications
+# Uncomment to enable SMS alerts
+# twilio
