@@ -13,8 +13,7 @@ RUN apt-get update && \
 COPY .. /app
 
 # Install Python dependencies (includes Twilio for SMS)
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip list | grep -i twilio
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Create recordings directory
 RUN mkdir -p /app/examples/recordings

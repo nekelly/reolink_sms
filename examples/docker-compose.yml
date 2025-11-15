@@ -13,8 +13,13 @@ services:
       - .env
 
     # Mount recordings directory to persist downloads
+    # Mount current directory to allow easy touchfile creation from host
     volumes:
       - ./recordings:/app/examples/recordings
+      - .:/app/examples/host
+      # Optional: Mount host root filesystem read-only (Linux only)
+      # Uncomment for production to monitor host disk space
+      # - /:/host:ro
 
     # Network mode: host allows direct access to camera on local network
     # Alternative: Use bridge mode and specify camera IP

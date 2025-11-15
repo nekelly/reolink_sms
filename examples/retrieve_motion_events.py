@@ -12,6 +12,7 @@ import asyncio
 import logging
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 from time import time as get_time
@@ -89,6 +90,26 @@ def get_config_value(config, key, default=None, value_type=str):
         return value
 
 
+def format_duration(seconds):
+    """Format seconds into human-readable duration (days, hours, minutes, seconds)"""
+    days = int(seconds // 86400)
+    hours = int((seconds % 86400) // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+
+    parts = []
+    if days > 0:
+        parts.append(f"{days}d")
+    if hours > 0:
+        parts.append(f"{hours}h")
+    if minutes > 0:
+        parts.append(f"{minutes}m")
+    if secs > 0 or not parts:  # Always show seconds if nothing else
+        parts.append(f"{secs}s")
+
+    return " ".join(parts)
+
+
 class MotionEventRetriever:
     """Retrieves motion events from Reolink camera"""
 
@@ -111,6 +132,18 @@ class MotionEventRetriever:
         self.sms_on_motion = False
         self.sms_cooldown = 300  # seconds
         self.last_sms_time = 0
+
+        # Touchfile setup
+        self.touchfile_path = None
+        self.touchfile_check_interval = 5
+        self.touchfile_enabled = False
+
+        # Disk monitoring setup
+        self.disk_monitor_enabled = False
+        self.disk_monitor_path = '/'
+        self.disk_monitor_threshold = 90
+        self.disk_monitor_check_interval = 3600
+        self.last_disk_alert_time = 0
 
         if twilio_config:
             self._setup_twilio(twilio_config)
@@ -147,6 +180,27 @@ class MotionEventRetriever:
 
             _LOGGER.info(f"✅ Twilio SMS initialized (from {from_number} to {to_number})")
             _LOGGER.info(f"   SMS cooldown: {self.sms_cooldown} seconds")
+
+            # Setup touchfile monitoring if configured
+            touchfile_path = config.get('touchfile_path')
+            if touchfile_path:
+                self.touchfile_path = Path(touchfile_path)
+                self.touchfile_check_interval = config.get('touchfile_check_interval', 5)
+                self.touchfile_enabled = True
+                _LOGGER.info(f"✅ Touchfile SMS trigger enabled: {self.touchfile_path}")
+                _LOGGER.info(f"   Check interval: {self.touchfile_check_interval} seconds")
+
+            # Setup disk monitoring if configured
+            disk_monitor_enabled = config.get('disk_monitor_enabled', False)
+            if disk_monitor_enabled:
+                self.disk_monitor_path = config.get('disk_monitor_path', '/')
+                self.disk_monitor_threshold = config.get('disk_monitor_threshold', 90)
+                self.disk_monitor_check_interval = config.get('disk_monitor_check_interval', 3600)
+                self.disk_monitor_enabled = True
+                _LOGGER.info(f"✅ Disk space monitoring enabled: {self.disk_monitor_path}")
+                _LOGGER.info(f"   Threshold: {self.disk_monitor_threshold}%")
+                _LOGGER.info(f"   Check interval: {self.disk_monitor_check_interval} seconds")
+
         except Exception as e:
             _LOGGER.error(f"Failed to setup Twilio: {e}")
             _LOGGER.info("Check your Twilio credentials in .env file")
@@ -175,7 +229,115 @@ class MotionEventRetriever:
             return True
         except Exception as e:
             _LOGGER.error(f"Failed to send SMS: {e}")
+            _LOGGER.error(f"  Message: {message[:100]}")
+            _LOGGER.error(f"  From: {self.twilio_from}")
+            _LOGGER.error(f"  To: {self.twilio_to}")
+            _LOGGER.error(f"  Exception type: {type(e).__name__}")
+
+            # Log specific Twilio error details if available
+            if hasattr(e, 'code'):
+                _LOGGER.error(f"  Twilio error code: {e.code}")
+            if hasattr(e, 'status'):
+                _LOGGER.error(f"  HTTP status: {e.status}")
+            if hasattr(e, 'msg'):
+                _LOGGER.error(f"  Error message: {e.msg}")
+
             return False
+
+    async def send_sms_async(self, message: str, force: bool = False):
+        """Async wrapper for send_sms to avoid blocking the event loop"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.send_sms, message, force)
+
+    async def _send_motion_sms(self, message: str):
+        """Helper to send motion detection SMS without blocking"""
+        try:
+            if await self.send_sms_async(message):
+                _LOGGER.info(f"📱 SMS alert sent to {self.twilio_to}")
+            else:
+                _LOGGER.debug("SMS not sent (cooldown active or failed)")
+        except Exception as e:
+            _LOGGER.error(f"Error sending motion SMS: {e}")
+
+    async def check_touchfile(self):
+        """Check for touchfile and send SMS if found"""
+        if not self.touchfile_enabled or not self.touchfile_path:
+            return
+
+        try:
+            if self.touchfile_path.exists():
+                _LOGGER.info(f"Touchfile detected: {self.touchfile_path}")
+
+                # Read message from file if it has content, otherwise use default
+                try:
+                    message_content = self.touchfile_path.read_text().strip()
+                    if message_content:
+                        message = message_content
+                    else:
+                        message = f"🔔 Manual alert triggered at {datetime.now().strftime('%H:%M:%S')}"
+                except Exception as e:
+                    _LOGGER.warning(f"Could not read touchfile content: {e}, using default message")
+                    message = f"🔔 Manual alert triggered at {datetime.now().strftime('%H:%M:%S')}"
+
+                # Send SMS (force=True to bypass cooldown for manual triggers)
+                if await self.send_sms_async(message, force=True):
+                    _LOGGER.info(f"📱 Touchfile SMS sent to {self.twilio_to}")
+                else:
+                    _LOGGER.warning("Failed to send touchfile SMS")
+
+                # Delete the touchfile after processing
+                try:
+                    self.touchfile_path.unlink()
+                    _LOGGER.debug(f"Touchfile deleted: {self.touchfile_path}")
+                except Exception as e:
+                    _LOGGER.warning(f"Could not delete touchfile: {e}")
+
+        except Exception as e:
+            _LOGGER.error(f"Error checking touchfile: {e}")
+
+    async def check_disk_space(self):
+        """Check disk space and send SMS if threshold exceeded"""
+        if not self.disk_monitor_enabled:
+            return
+
+        try:
+            import shutil
+
+            # Get disk usage statistics
+            usage = shutil.disk_usage(self.disk_monitor_path)
+            percent_used = (usage.used / usage.total) * 100
+            percent_free = (usage.free / usage.total) * 100
+
+            _LOGGER.debug(f"Disk {self.disk_monitor_path}: {percent_used:.1f}% used, {percent_free:.1f}% free")
+
+            # Check if threshold exceeded
+            if percent_used >= self.disk_monitor_threshold:
+                # Check cooldown (use SMS cooldown to avoid spam)
+                current_time = get_time()
+                if (current_time - self.last_disk_alert_time) < self.sms_cooldown:
+                    remaining = int(self.sms_cooldown - (current_time - self.last_disk_alert_time))
+                    _LOGGER.debug(f"Disk alert cooldown active, {remaining}s remaining")
+                    return
+
+                # Format sizes for human readability
+                used_gb = usage.used / (1024**3)
+                total_gb = usage.total / (1024**3)
+                free_gb = usage.free / (1024**3)
+
+                message = (
+                    f"⚠️ Disk space alert: {self.disk_monitor_path}\n"
+                    f"{percent_used:.1f}% used ({used_gb:.1f}GB / {total_gb:.1f}GB)\n"
+                    f"{free_gb:.1f}GB free remaining"
+                )
+
+                if await self.send_sms_async(message, force=False):
+                    _LOGGER.warning(f"Disk space alert sent: {percent_used:.1f}% used on {self.disk_monitor_path}")
+                    self.last_disk_alert_time = current_time
+                else:
+                    _LOGGER.warning(f"Failed to send disk space alert (cooldown or error)")
+
+        except Exception as e:
+            _LOGGER.error(f"Error checking disk space: {e}")
 
     async def setup(self):
         """Initialize connection and get camera info"""
@@ -252,11 +414,20 @@ class MotionEventRetriever:
 
         def event_callback():
             """Called when any event occurs"""
+            _LOGGER.debug("event_callback() called")
             timestamp = datetime.now()
 
             # Check if motion state changed
-            motion_now = self.host_obj.motion_detected(channel)
+            try:
+                _LOGGER.debug("Checking motion_detected()...")
+                motion_now = self.host_obj.motion_detected(channel)
+                _LOGGER.debug(f"motion_detected() returned: {motion_now}")
+            except Exception as e:
+                _LOGGER.error(f"Error checking motion state: {e}")
+                return
+
             was_motion = self.last_motion_state.get(channel, False)
+            _LOGGER.debug(f"Motion state: was={was_motion}, now={motion_now}")
 
             if motion_now and not was_motion:
                 _LOGGER.info(f"[{timestamp}] ⚡ MOTION STARTED on channel {channel}")
@@ -268,14 +439,18 @@ class MotionEventRetriever:
 
                 # Send SMS notification if enabled
                 if self.sms_on_motion:
+                    _LOGGER.debug("Preparing SMS alert...")
                     camera_name = self.host_obj.camera_name(channel)
+                    _LOGGER.debug(f"Camera name: {camera_name}")
+
                     sms_message = (
                         f"🚨 Motion detected on {camera_name} at {timestamp.strftime('%H:%M:%S')}"
                     )
-                    if self.send_sms(sms_message):
-                        _LOGGER.info(f"📱 SMS alert sent to {self.twilio_to}")
-                    else:
-                        _LOGGER.debug("SMS not sent (cooldown active or failed)")
+
+                    # Schedule async SMS send as a task to avoid blocking
+                    _LOGGER.debug("Scheduling SMS send task...")
+                    asyncio.create_task(self._send_motion_sms(sms_message))
+                    _LOGGER.debug("SMS task scheduled")
 
             elif not motion_now and was_motion:
                 _LOGGER.info(f"[{timestamp}] ✓ MOTION ENDED on channel {channel}")
@@ -286,6 +461,7 @@ class MotionEventRetriever:
                 })
 
             self.last_motion_state[channel] = motion_now
+            _LOGGER.debug("event_callback() completed")
 
         # Register callback
         self.host_obj.baichuan.register_callback("motion_monitor", event_callback)
@@ -307,20 +483,52 @@ class MotionEventRetriever:
             elapsed = 0
             infinite_mode = (duration_seconds == 0)
 
-            while infinite_mode or elapsed < duration_seconds:
-                wait_time = check_interval if infinite_mode else min(check_interval, duration_seconds - elapsed)
-                await asyncio.sleep(wait_time)
-                elapsed += wait_time
+            # Determine touchfile check interval (use smaller interval for more responsive checks)
+            touchfile_interval = self.touchfile_check_interval if self.touchfile_enabled else check_interval
+            next_touchfile_check = 0
+            next_status_log = check_interval
+            next_motion_poll = 10  # Check motion state every 10 seconds
+            next_disk_check = 0  # Check disk space immediately on start
 
-                # Log progress
-                if infinite_mode:
-                    _LOGGER.info(f"Still monitoring... running for {elapsed} seconds, "
-                               f"{len(self.motion_events)} events detected so far")
-                else:
-                    remaining = duration_seconds - elapsed
-                    if remaining > 0:
-                        _LOGGER.info(f"Still monitoring... {remaining} seconds remaining, "
+            while infinite_mode or elapsed < duration_seconds:
+                # Sleep in small increments to allow responsive touchfile checking
+                sleep_time = min(touchfile_interval, 1) if self.touchfile_enabled else check_interval
+                if not infinite_mode:
+                    sleep_time = min(sleep_time, duration_seconds - elapsed)
+
+                await asyncio.sleep(sleep_time)
+                elapsed += sleep_time
+
+                # Check touchfile if enabled and interval reached
+                if self.touchfile_enabled and elapsed >= next_touchfile_check:
+                    await self.check_touchfile()
+                    next_touchfile_check = elapsed + touchfile_interval
+
+                # Manually check motion state to catch missed callbacks
+                # This handles cases where the Baichuan callback doesn't fire for motion end
+                if elapsed >= next_motion_poll:
+                    try:
+                        event_callback()
+                    except Exception as e:
+                        _LOGGER.error(f"Error in motion poll callback: {e}")
+                    next_motion_poll = elapsed + 10  # Next check in 10 seconds
+
+                # Check disk space if enabled and interval reached
+                if self.disk_monitor_enabled and elapsed >= next_disk_check:
+                    await self.check_disk_space()
+                    next_disk_check = elapsed + self.disk_monitor_check_interval
+
+                # Log progress at regular intervals
+                if elapsed >= next_status_log:
+                    if infinite_mode:
+                        _LOGGER.info(f"Still monitoring... running for {format_duration(elapsed)}, "
                                    f"{len(self.motion_events)} events detected so far")
+                    else:
+                        remaining = duration_seconds - elapsed
+                        if remaining > 0:
+                            _LOGGER.info(f"Still monitoring... {format_duration(remaining)} remaining, "
+                                       f"{len(self.motion_events)} events detected so far")
+                    next_status_log = elapsed + check_interval
 
         except KeyboardInterrupt:
             _LOGGER.info("Monitoring interrupted by user")
@@ -459,6 +667,22 @@ async def main():
     # Load configuration
     config = load_env()
 
+    # Configure logging level from config
+    log_level_str = get_config_value(config, 'LOG_LEVEL', 'INFO', str).upper()
+    level_map = {
+        'DEBUG': logging.DEBUG,
+        'INFO': logging.INFO,
+        'WARNING': logging.WARNING,
+        'ERROR': logging.ERROR,
+        'CRITICAL': logging.CRITICAL
+    }
+    if log_level_str in level_map:
+        logging.getLogger().setLevel(level_map[log_level_str])
+        _LOGGER.setLevel(level_map[log_level_str])
+        _LOGGER.info(f"Log level set to: {log_level_str}")
+    else:
+        _LOGGER.warning(f"Invalid LOG_LEVEL '{log_level_str}', using INFO")
+
     # Parse configuration
     host = get_config_value(config, 'CAMERA_HOST', '192.168.1.10')
     username = get_config_value(config, 'CAMERA_USERNAME', 'admin')
@@ -479,6 +703,12 @@ async def main():
         'to_number': get_config_value(config, 'TWILIO_TO_NUMBER', ''),
         'sms_on_motion': get_config_value(config, 'SMS_ON_MOTION', False, bool),
         'sms_cooldown': get_config_value(config, 'SMS_COOLDOWN', 300, int),
+        'touchfile_path': get_config_value(config, 'TOUCHFILE_PATH', ''),
+        'touchfile_check_interval': get_config_value(config, 'TOUCHFILE_CHECK_INTERVAL', 5, int),
+        'disk_monitor_enabled': get_config_value(config, 'DISK_MONITOR_ENABLED', False, bool),
+        'disk_monitor_path': get_config_value(config, 'DISK_MONITOR_PATH', '/'),
+        'disk_monitor_threshold': get_config_value(config, 'DISK_MONITOR_THRESHOLD', 90, int),
+        'disk_monitor_check_interval': get_config_value(config, 'DISK_MONITOR_CHECK_INTERVAL', 3600, int),
     }
 
     # Configure Baichuan logging level
