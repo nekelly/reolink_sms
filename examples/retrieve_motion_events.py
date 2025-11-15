@@ -190,6 +190,19 @@ class MotionEventRetriever:
             return True
         except Exception as e:
             _LOGGER.error(f"Failed to send SMS: {e}")
+            _LOGGER.error(f"  Message: {message[:100]}")
+            _LOGGER.error(f"  From: {self.twilio_from}")
+            _LOGGER.error(f"  To: {self.twilio_to}")
+            _LOGGER.error(f"  Exception type: {type(e).__name__}")
+
+            # Log specific Twilio error details if available
+            if hasattr(e, 'code'):
+                _LOGGER.error(f"  Twilio error code: {e.code}")
+            if hasattr(e, 'status'):
+                _LOGGER.error(f"  HTTP status: {e.status}")
+            if hasattr(e, 'msg'):
+                _LOGGER.error(f"  Error message: {e.msg}")
+
             return False
 
     async def check_touchfile(self):
