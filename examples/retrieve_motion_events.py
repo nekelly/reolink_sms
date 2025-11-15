@@ -377,6 +377,11 @@ class MotionEventRetriever:
                     await self.check_touchfile()
                     next_touchfile_check = elapsed + touchfile_interval
 
+                # Manually check motion state to catch missed callbacks
+                # This handles cases where the Baichuan callback doesn't fire for motion end
+                if int(elapsed) % 10 == 0:  # Check every 10 seconds
+                    event_callback()
+
                 # Log progress at regular intervals
                 if elapsed >= next_status_log:
                     if infinite_mode:
