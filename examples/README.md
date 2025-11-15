@@ -179,6 +179,10 @@ monitor_duration = 600  # 10 minutes
 | `SMS_COOLDOWN` | Minimum seconds between SMS messages (prevents spam) | `300` (5 min) |
 | `TOUCHFILE_PATH` | Path to file that triggers manual SMS when created | - |
 | `TOUCHFILE_CHECK_INTERVAL` | How often to check for touchfile in seconds | `5` |
+| `DISK_MONITOR_ENABLED` | Enable disk space monitoring and alerts (`true`/`false`) | `false` |
+| `DISK_MONITOR_PATH` | Path to monitor (e.g., `/` for root filesystem) | `/` |
+| `DISK_MONITOR_THRESHOLD` | Alert when disk usage exceeds this percentage | `90` |
+| `DISK_MONITOR_CHECK_INTERVAL` | How often to check disk space in seconds | `3600` (1 hour) |
 
 ## SMS Notifications with Twilio
 
@@ -291,6 +295,55 @@ if [ $(df -h /recordings | tail -1 | awk '{print $5}' | sed 's/%//') -gt 90 ]; t
     echo "⚠️ Recording disk 90% full" > /app/examples/trigger_sms.txt
 fi
 ```
+
+### Disk Space Monitoring
+
+The script includes built-in disk space monitoring that automatically sends SMS alerts when disk usage exceeds a threshold.
+
+**Setup:**
+
+Add to your `.env` file:
+```bash
+DISK_MONITOR_ENABLED=true
+DISK_MONITOR_PATH=/                  # Monitor root filesystem
+DISK_MONITOR_THRESHOLD=90            # Alert at 90% usage
+DISK_MONITOR_CHECK_INTERVAL=3600     # Check every hour
+```
+
+**Features:**
+- **Automatic monitoring** - Checks disk space at regular intervals
+- **Threshold alerts** - Only sends SMS when usage exceeds configured percentage
+- **Cooldown protection** - Uses same cooldown as motion alerts to prevent spam
+- **Detailed info** - SMS includes used/free space in GB and percentage
+- **Works on Linux** - Monitors any mounted filesystem path
+
+**Example SMS Message:**
+```
+⚠️ Disk space alert: /
+90.5% used (181.0GB / 200.0GB)
+19.0GB free remaining
+```
+
+**Docker Setup for Host Monitoring:**
+
+To monitor the host's root filesystem (not just container), uncomment this line in [docker-compose.yml](docker-compose.yml):
+```yaml
+volumes:
+  - ./recordings:/app/examples/recordings
+  - .:/app/examples/host
+  - /:/host:ro  # Uncomment this line
+```
+
+Then set in `.env`:
+```bash
+DISK_MONITOR_PATH=/host  # Monitor host root filesystem
+```
+
+**Use Cases:**
+- Monitor recording storage to prevent running out of space
+- Alert before disk fills up completely
+- Track storage usage on NAS or dedicated recording drives
+- Integration with automated cleanup scripts
 
 ## Docker Deployment
 

@@ -89,6 +89,26 @@ def get_config_value(config, key, default=None, value_type=str):
         return value
 
 
+def format_duration(seconds):
+    """Format seconds into human-readable duration (days, hours, minutes, seconds)"""
+    days = int(seconds // 86400)
+    hours = int((seconds % 86400) // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+
+    parts = []
+    if days > 0:
+        parts.append(f"{days}d")
+    if hours > 0:
+        parts.append(f"{hours}h")
+    if minutes > 0:
+        parts.append(f"{minutes}m")
+    if secs > 0 or not parts:  # Always show seconds if nothing else
+        parts.append(f"{secs}s")
+
+    return " ".join(parts)
+
+
 class MotionEventRetriever:
     """Retrieves motion events from Reolink camera"""
 
@@ -116,6 +136,13 @@ class MotionEventRetriever:
         self.touchfile_path = None
         self.touchfile_check_interval = 5
         self.touchfile_enabled = False
+
+        # Disk monitoring setup
+        self.disk_monitor_enabled = False
+        self.disk_monitor_path = '/'
+        self.disk_monitor_threshold = 90
+        self.disk_monitor_check_interval = 3600
+        self.last_disk_alert_time = 0
 
         if twilio_config:
             self._setup_twilio(twilio_config)
@@ -161,6 +188,17 @@ class MotionEventRetriever:
                 self.touchfile_enabled = True
                 _LOGGER.info(f"✅ Touchfile SMS trigger enabled: {self.touchfile_path}")
                 _LOGGER.info(f"   Check interval: {self.touchfile_check_interval} seconds")
+
+            # Setup disk monitoring if configured
+            disk_monitor_enabled = config.get('disk_monitor_enabled', False)
+            if disk_monitor_enabled:
+                self.disk_monitor_path = config.get('disk_monitor_path', '/')
+                self.disk_monitor_threshold = config.get('disk_monitor_threshold', 90)
+                self.disk_monitor_check_interval = config.get('disk_monitor_check_interval', 3600)
+                self.disk_monitor_enabled = True
+                _LOGGER.info(f"✅ Disk space monitoring enabled: {self.disk_monitor_path}")
+                _LOGGER.info(f"   Threshold: {self.disk_monitor_threshold}%")
+                _LOGGER.info(f"   Check interval: {self.disk_monitor_check_interval} seconds")
 
         except Exception as e:
             _LOGGER.error(f"Failed to setup Twilio: {e}")
@@ -240,6 +278,50 @@ class MotionEventRetriever:
 
         except Exception as e:
             _LOGGER.error(f"Error checking touchfile: {e}")
+
+    async def check_disk_space(self):
+        """Check disk space and send SMS if threshold exceeded"""
+        if not self.disk_monitor_enabled:
+            return
+
+        try:
+            import shutil
+
+            # Get disk usage statistics
+            usage = shutil.disk_usage(self.disk_monitor_path)
+            percent_used = (usage.used / usage.total) * 100
+            percent_free = (usage.free / usage.total) * 100
+
+            _LOGGER.debug(f"Disk {self.disk_monitor_path}: {percent_used:.1f}% used, {percent_free:.1f}% free")
+
+            # Check if threshold exceeded
+            if percent_used >= self.disk_monitor_threshold:
+                # Check cooldown (use SMS cooldown to avoid spam)
+                current_time = get_time()
+                if (current_time - self.last_disk_alert_time) < self.sms_cooldown:
+                    remaining = int(self.sms_cooldown - (current_time - self.last_disk_alert_time))
+                    _LOGGER.debug(f"Disk alert cooldown active, {remaining}s remaining")
+                    return
+
+                # Format sizes for human readability
+                used_gb = usage.used / (1024**3)
+                total_gb = usage.total / (1024**3)
+                free_gb = usage.free / (1024**3)
+
+                message = (
+                    f"⚠️ Disk space alert: {self.disk_monitor_path}\n"
+                    f"{percent_used:.1f}% used ({used_gb:.1f}GB / {total_gb:.1f}GB)\n"
+                    f"{free_gb:.1f}GB free remaining"
+                )
+
+                if self.send_sms(message, force=False):
+                    _LOGGER.warning(f"Disk space alert sent: {percent_used:.1f}% used on {self.disk_monitor_path}")
+                    self.last_disk_alert_time = current_time
+                else:
+                    _LOGGER.warning(f"Failed to send disk space alert (cooldown or error)")
+
+        except Exception as e:
+            _LOGGER.error(f"Error checking disk space: {e}")
 
     async def setup(self):
         """Initialize connection and get camera info"""
@@ -381,6 +463,7 @@ class MotionEventRetriever:
             next_touchfile_check = 0
             next_status_log = check_interval
             next_motion_poll = 10  # Check motion state every 10 seconds
+            next_disk_check = 0  # Check disk space immediately on start
 
             while infinite_mode or elapsed < duration_seconds:
                 # Sleep in small increments to allow responsive touchfile checking
@@ -405,15 +488,20 @@ class MotionEventRetriever:
                         _LOGGER.error(f"Error in motion poll callback: {e}")
                     next_motion_poll = elapsed + 10  # Next check in 10 seconds
 
+                # Check disk space if enabled and interval reached
+                if self.disk_monitor_enabled and elapsed >= next_disk_check:
+                    await self.check_disk_space()
+                    next_disk_check = elapsed + self.disk_monitor_check_interval
+
                 # Log progress at regular intervals
                 if elapsed >= next_status_log:
                     if infinite_mode:
-                        _LOGGER.info(f"Still monitoring... running for {elapsed} seconds, "
+                        _LOGGER.info(f"Still monitoring... running for {format_duration(elapsed)}, "
                                    f"{len(self.motion_events)} events detected so far")
                     else:
                         remaining = duration_seconds - elapsed
                         if remaining > 0:
-                            _LOGGER.info(f"Still monitoring... {remaining} seconds remaining, "
+                            _LOGGER.info(f"Still monitoring... {format_duration(remaining)} remaining, "
                                        f"{len(self.motion_events)} events detected so far")
                     next_status_log = elapsed + check_interval
 
@@ -576,6 +664,10 @@ async def main():
         'sms_cooldown': get_config_value(config, 'SMS_COOLDOWN', 300, int),
         'touchfile_path': get_config_value(config, 'TOUCHFILE_PATH', ''),
         'touchfile_check_interval': get_config_value(config, 'TOUCHFILE_CHECK_INTERVAL', 5, int),
+        'disk_monitor_enabled': get_config_value(config, 'DISK_MONITOR_ENABLED', False, bool),
+        'disk_monitor_path': get_config_value(config, 'DISK_MONITOR_PATH', '/'),
+        'disk_monitor_threshold': get_config_value(config, 'DISK_MONITOR_THRESHOLD', 90, int),
+        'disk_monitor_check_interval': get_config_value(config, 'DISK_MONITOR_CHECK_INTERVAL', 3600, int),
     }
 
     # Configure Baichuan logging level
