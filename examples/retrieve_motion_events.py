@@ -26,12 +26,9 @@ from reolink_aio.typings import VOD_trigger
 try:
     from twilio.rest import Client as TwilioClient
     TWILIO_AVAILABLE = True
-except ImportError as e:
+except ImportError:
     TWILIO_AVAILABLE = False
     TwilioClient = None
-    import sys
-    print(f"DEBUG: Twilio import failed: {e}", file=sys.stderr)
-    print(f"DEBUG: Python path: {sys.path}", file=sys.stderr)
 
 # Setup logging
 logging.basicConfig(
@@ -115,6 +112,11 @@ class MotionEventRetriever:
         self.sms_cooldown = 300  # seconds
         self.last_sms_time = 0
 
+        # Touchfile setup
+        self.touchfile_path = None
+        self.touchfile_check_interval = 5
+        self.touchfile_enabled = False
+
         if twilio_config:
             self._setup_twilio(twilio_config)
 
@@ -150,6 +152,16 @@ class MotionEventRetriever:
 
             _LOGGER.info(f"✅ Twilio SMS initialized (from {from_number} to {to_number})")
             _LOGGER.info(f"   SMS cooldown: {self.sms_cooldown} seconds")
+
+            # Setup touchfile monitoring if configured
+            touchfile_path = config.get('touchfile_path')
+            if touchfile_path:
+                self.touchfile_path = Path(touchfile_path)
+                self.touchfile_check_interval = config.get('touchfile_check_interval', 5)
+                self.touchfile_enabled = True
+                _LOGGER.info(f"✅ Touchfile SMS trigger enabled: {self.touchfile_path}")
+                _LOGGER.info(f"   Check interval: {self.touchfile_check_interval} seconds")
+
         except Exception as e:
             _LOGGER.error(f"Failed to setup Twilio: {e}")
             _LOGGER.info("Check your Twilio credentials in .env file")
@@ -179,6 +191,42 @@ class MotionEventRetriever:
         except Exception as e:
             _LOGGER.error(f"Failed to send SMS: {e}")
             return False
+
+    async def check_touchfile(self):
+        """Check for touchfile and send SMS if found"""
+        if not self.touchfile_enabled or not self.touchfile_path:
+            return
+
+        try:
+            if self.touchfile_path.exists():
+                _LOGGER.info(f"Touchfile detected: {self.touchfile_path}")
+
+                # Read message from file if it has content, otherwise use default
+                try:
+                    message_content = self.touchfile_path.read_text().strip()
+                    if message_content:
+                        message = message_content
+                    else:
+                        message = f"🔔 Manual alert triggered at {datetime.now().strftime('%H:%M:%S')}"
+                except Exception as e:
+                    _LOGGER.warning(f"Could not read touchfile content: {e}, using default message")
+                    message = f"🔔 Manual alert triggered at {datetime.now().strftime('%H:%M:%S')}"
+
+                # Send SMS (force=True to bypass cooldown for manual triggers)
+                if self.send_sms(message, force=True):
+                    _LOGGER.info(f"📱 Touchfile SMS sent to {self.twilio_to}")
+                else:
+                    _LOGGER.warning("Failed to send touchfile SMS")
+
+                # Delete the touchfile after processing
+                try:
+                    self.touchfile_path.unlink()
+                    _LOGGER.debug(f"Touchfile deleted: {self.touchfile_path}")
+                except Exception as e:
+                    _LOGGER.warning(f"Could not delete touchfile: {e}")
+
+        except Exception as e:
+            _LOGGER.error(f"Error checking touchfile: {e}")
 
     async def setup(self):
         """Initialize connection and get camera info"""
@@ -310,20 +358,36 @@ class MotionEventRetriever:
             elapsed = 0
             infinite_mode = (duration_seconds == 0)
 
-            while infinite_mode or elapsed < duration_seconds:
-                wait_time = check_interval if infinite_mode else min(check_interval, duration_seconds - elapsed)
-                await asyncio.sleep(wait_time)
-                elapsed += wait_time
+            # Determine touchfile check interval (use smaller interval for more responsive checks)
+            touchfile_interval = self.touchfile_check_interval if self.touchfile_enabled else check_interval
+            next_touchfile_check = 0
+            next_status_log = check_interval
 
-                # Log progress
-                if infinite_mode:
-                    _LOGGER.info(f"Still monitoring... running for {elapsed} seconds, "
-                               f"{len(self.motion_events)} events detected so far")
-                else:
-                    remaining = duration_seconds - elapsed
-                    if remaining > 0:
-                        _LOGGER.info(f"Still monitoring... {remaining} seconds remaining, "
+            while infinite_mode or elapsed < duration_seconds:
+                # Sleep in small increments to allow responsive touchfile checking
+                sleep_time = min(touchfile_interval, 1) if self.touchfile_enabled else check_interval
+                if not infinite_mode:
+                    sleep_time = min(sleep_time, duration_seconds - elapsed)
+
+                await asyncio.sleep(sleep_time)
+                elapsed += sleep_time
+
+                # Check touchfile if enabled and interval reached
+                if self.touchfile_enabled and elapsed >= next_touchfile_check:
+                    await self.check_touchfile()
+                    next_touchfile_check = elapsed + touchfile_interval
+
+                # Log progress at regular intervals
+                if elapsed >= next_status_log:
+                    if infinite_mode:
+                        _LOGGER.info(f"Still monitoring... running for {elapsed} seconds, "
                                    f"{len(self.motion_events)} events detected so far")
+                    else:
+                        remaining = duration_seconds - elapsed
+                        if remaining > 0:
+                            _LOGGER.info(f"Still monitoring... {remaining} seconds remaining, "
+                                       f"{len(self.motion_events)} events detected so far")
+                    next_status_log = elapsed + check_interval
 
         except KeyboardInterrupt:
             _LOGGER.info("Monitoring interrupted by user")
@@ -482,6 +546,8 @@ async def main():
         'to_number': get_config_value(config, 'TWILIO_TO_NUMBER', ''),
         'sms_on_motion': get_config_value(config, 'SMS_ON_MOTION', False, bool),
         'sms_cooldown': get_config_value(config, 'SMS_COOLDOWN', 300, int),
+        'touchfile_path': get_config_value(config, 'TOUCHFILE_PATH', ''),
+        'touchfile_check_interval': get_config_value(config, 'TOUCHFILE_CHECK_INTERVAL', 5, int),
     }
 
     # Configure Baichuan logging level

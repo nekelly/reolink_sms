@@ -177,6 +177,8 @@ monitor_duration = 600  # 10 minutes
 | `TWILIO_TO_NUMBER` | Your phone number to receive alerts (e.g., +15559876543) | - |
 | `SMS_ON_MOTION` | Send SMS when motion detected (`true`/`false`) | `false` |
 | `SMS_COOLDOWN` | Minimum seconds between SMS messages (prevents spam) | `300` (5 min) |
+| `TOUCHFILE_PATH` | Path to file that triggers manual SMS when created | - |
+| `TOUCHFILE_CHECK_INTERVAL` | How often to check for touchfile in seconds | `5` |
 
 ## SMS Notifications with Twilio
 
@@ -227,6 +229,68 @@ SMS_COOLDOWN=300
 ### Cost
 
 Twilio charges per SMS (typically $0.0075/message in US). With the default 5-minute cooldown, maximum cost would be ~$2.16/day if motion is constantly detected.
+
+### Manual SMS Trigger (Touchfile)
+
+The touchfile feature allows you to manually trigger an SMS alert by creating a file. This is useful for:
+- Testing SMS notifications
+- Manual alerts from other scripts or automation
+- Integration with home automation systems
+- Remote notifications via file sharing/sync
+
+**Setup:**
+
+Add to your `.env` file:
+```bash
+TOUCHFILE_PATH=/app/examples/trigger_sms.txt
+TOUCHFILE_CHECK_INTERVAL=5  # Check every 5 seconds
+```
+
+**Usage:**
+
+To trigger an SMS alert, simply create the file:
+
+```bash
+# Send alert with default message
+touch /app/examples/trigger_sms.txt
+
+# Or write a custom message
+echo "Security alert: Front door opened" > /app/examples/trigger_sms.txt
+```
+
+The script will:
+1. Detect the file within 5 seconds (or your configured interval)
+2. Read the message from the file (or use a default message if empty)
+3. Send the SMS immediately (bypasses cooldown)
+4. Delete the file automatically after sending
+
+**Docker Example:**
+
+From outside the container:
+```bash
+# Create touchfile in mounted directory
+docker-compose exec reolink-motion-monitor touch /app/examples/trigger_sms.txt
+
+# Or with custom message
+docker-compose exec reolink-motion-monitor sh -c 'echo "Pool area motion detected" > /app/examples/trigger_sms.txt'
+```
+
+**Features:**
+- **No cooldown** - Manual triggers bypass the SMS cooldown period
+- **Custom messages** - Write any message to the file
+- **Auto-cleanup** - File is deleted after processing
+- **Safe** - Won't spam even if created repeatedly (cooldown still applies to subsequent motion events)
+
+**Integration Example:**
+
+Use with cron, home automation, or other scripts:
+```bash
+#!/bin/bash
+# Script to send alert when disk space is low
+if [ $(df -h /recordings | tail -1 | awk '{print $5}' | sed 's/%//') -gt 90 ]; then
+    echo "⚠️ Recording disk 90% full" > /app/examples/trigger_sms.txt
+fi
+```
 
 ## Docker Deployment
 
