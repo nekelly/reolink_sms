@@ -26,9 +26,12 @@ from reolink_aio.typings import VOD_trigger
 try:
     from twilio.rest import Client as TwilioClient
     TWILIO_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     TWILIO_AVAILABLE = False
     TwilioClient = None
+    import sys
+    print(f"DEBUG: Twilio import failed: {e}", file=sys.stderr)
+    print(f"DEBUG: Python path: {sys.path}", file=sys.stderr)
 
 # Setup logging
 logging.basicConfig(
