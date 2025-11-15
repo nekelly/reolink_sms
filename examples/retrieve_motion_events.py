@@ -419,7 +419,10 @@ class MotionEventRetriever:
 
                 # Send SMS notification if enabled
                 if self.sms_on_motion:
+                    _LOGGER.info("Start Calling camera_name() ...")
                     camera_name = self.host_obj.camera_name(channel)
+                    _LOGGER.info("End Calling camera_name()")
+
                     sms_message = (
                         f"🚨 Motion detected on {camera_name} at {timestamp.strftime('%H:%M:%S')}"
                     )
