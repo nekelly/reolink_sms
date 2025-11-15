@@ -10,4 +10,4 @@ typing_extensions
 
 # Optional: Twilio for SMS notifications
 # Uncomment to enable SMS alerts
-# twilio
+twilio
