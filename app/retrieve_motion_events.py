@@ -382,7 +382,14 @@ class MotionEventRetriever:
             _LOGGER.warning(f"Motion detection is DISABLED on channel {channel}")
             _LOGGER.info("Attempting to enable motion detection via API...")
             try:
-                await self.host_obj.set_motion_detection(channel, True)
+                # Handle both "Alarm" and "MdAlarm" structure variations
+                body = [{"cmd": "SetAlarm", "action": 0, "param": md_settings}]
+                if "Alarm" in md_settings:
+                    body[0]["param"]["Alarm"]["enable"] = 1
+                elif "MdAlarm" in md_settings:
+                    body[0]["param"]["MdAlarm"]["enable"] = 1
+
+                await self.host_obj.send_setting(body)
                 # Refresh settings to verify
                 await self.host_obj.get_states()
                 _LOGGER.info("✓ Motion detection enabled successfully")

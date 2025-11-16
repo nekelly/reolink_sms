@@ -13,10 +13,10 @@ RUN apt-get update && \
 COPY . /build
 
 # Install Python dependencies from root
-RUN pip install --no-cache-dir -r /build/requirements.txt
+RUN pip install -r /build/requirements.txt
 
 # Install the reolink_aio package
-RUN pip install --no-cache-dir /build
+RUN pip install /build
 
 # Copy app files to /app
 COPY app /app/
