@@ -381,13 +381,23 @@ class MotionEventRetriever:
         if not is_enabled:
             _LOGGER.warning(f"Motion detection is DISABLED on channel {channel}")
             _LOGGER.info("Attempting to enable motion detection via API...")
+            _LOGGER.debug(f"Current motion detection settings: {md_settings}")
+
             try:
+                # Make a deep copy to avoid modifying cached settings
+                import copy
+                settings_copy = copy.deepcopy(md_settings)
+
                 # Handle both "Alarm" and "MdAlarm" structure variations
-                body = [{"cmd": "SetAlarm", "action": 0, "param": md_settings}]
-                if "Alarm" in md_settings:
-                    body[0]["param"]["Alarm"]["enable"] = 1
-                elif "MdAlarm" in md_settings:
-                    body[0]["param"]["MdAlarm"]["enable"] = 1
+                if "Alarm" in settings_copy:
+                    settings_copy["Alarm"]["enable"] = 1
+                    _LOGGER.debug("Using 'Alarm' structure")
+                elif "MdAlarm" in settings_copy:
+                    settings_copy["MdAlarm"]["enable"] = 1
+                    _LOGGER.debug("Using 'MdAlarm' structure")
+
+                body = [{"cmd": "SetAlarm", "action": 0, "param": settings_copy}]
+                _LOGGER.debug(f"Sending SetAlarm command: {body}")
 
                 await self.host_obj.send_setting(body)
                 # Refresh settings to verify
