@@ -380,7 +380,16 @@ class MotionEventRetriever:
 
         if not is_enabled:
             _LOGGER.warning(f"Motion detection is DISABLED on channel {channel}")
-            return False
+            _LOGGER.info("Attempting to enable motion detection via API...")
+            try:
+                await self.host_obj.set_motion_detection(channel, True)
+                # Refresh settings to verify
+                await self.host_obj.get_states()
+                _LOGGER.info("✓ Motion detection enabled successfully")
+            except Exception as e:
+                _LOGGER.error(f"Failed to enable motion detection: {e}")
+                _LOGGER.warning("Please enable motion detection manually in camera settings")
+                return False
 
         _LOGGER.info(f"Motion detection is enabled on channel {channel}")
         sensitivity = self.host_obj.md_sensitivity(channel)
