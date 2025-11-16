@@ -1,6 +1,6 @@
-# Reolink AIO Examples
+# Reolink Motion Monitor
 
-This directory contains example scripts demonstrating how to use the `reolink_aio` library.
+Real-time motion detection monitoring application for Reolink cameras with SMS alerts.
 
 ## Setup
 
@@ -246,7 +246,7 @@ The touchfile feature allows you to manually trigger an SMS alert by creating a 
 
 Add to your `.env` file:
 ```bash
-TOUCHFILE_PATH=/app/examples/trigger_sms.txt
+TOUCHFILE_PATH=/app/trigger_sms.txt
 TOUCHFILE_CHECK_INTERVAL=5  # Check every 5 seconds
 ```
 
@@ -256,10 +256,10 @@ To trigger an SMS alert, simply create the file:
 
 ```bash
 # Send alert with default message
-touch /app/examples/trigger_sms.txt
+touch /app/trigger_sms.txt
 
 # Or write a custom message
-echo "Security alert: Front door opened" > /app/examples/trigger_sms.txt
+echo "Security alert: Front door opened" > /app/trigger_sms.txt
 ```
 
 The script will:
@@ -273,10 +273,10 @@ The script will:
 From outside the container:
 ```bash
 # Create touchfile in mounted directory
-docker-compose exec reolink-motion-monitor touch /app/examples/trigger_sms.txt
+docker-compose exec reolink-motion-monitor touch /app/trigger_sms.txt
 
 # Or with custom message
-docker-compose exec reolink-motion-monitor sh -c 'echo "Pool area motion detected" > /app/examples/trigger_sms.txt'
+docker-compose exec reolink-motion-monitor sh -c 'echo "Pool area motion detected" > /app/trigger_sms.txt'
 ```
 
 **Features:**
@@ -292,7 +292,7 @@ Use with cron, home automation, or other scripts:
 #!/bin/bash
 # Script to send alert when disk space is low
 if [ $(df -h /recordings | tail -1 | awk '{print $5}' | sed 's/%//') -gt 90 ]; then
-    echo "⚠️ Recording disk 90% full" > /app/examples/trigger_sms.txt
+    echo "⚠️ Recording disk 90% full" > /app/trigger_sms.txt
 fi
 ```
 
@@ -329,8 +329,8 @@ DISK_MONITOR_CHECK_INTERVAL=3600     # Check every hour
 To monitor the host's root filesystem (not just container), uncomment this line in [docker-compose.yml](docker-compose.yml):
 ```yaml
 volumes:
-  - ./recordings:/app/examples/recordings
-  - .:/app/examples/host
+  - ./recordings:/app/recordings
+  - .:/app/host
   - /:/host:ro  # Uncomment this line
 ```
 
@@ -386,7 +386,7 @@ The `recordings` directory is mounted as a volume, so downloaded recordings pers
 
 ```yaml
 volumes:
-  - ./recordings:/app/examples/recordings
+  - ./recordings:/app/recordings
 ```
 
 ### Network Configuration
@@ -424,22 +424,22 @@ services:
   camera-front:
     build:
       context: ..
-      dockerfile: examples/Dockerfile
+      dockerfile: app/Dockerfile
     container_name: reolink-front
     env_file:
       - .env.front
     volumes:
-      - ./recordings/front:/app/examples/recordings
+      - ./recordings/front:/app/recordings
 
   camera-back:
     build:
       context: ..
-      dockerfile: examples/Dockerfile
+      dockerfile: app/Dockerfile
     container_name: reolink-back
     env_file:
       - .env.back
     volumes:
-      - ./recordings/back:/app/examples/recordings
+      - ./recordings/back:/app/recordings
 ```
 
 Then create separate `.env.front` and `.env.back` files with different camera configurations.

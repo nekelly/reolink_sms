@@ -4,7 +4,7 @@ services:
   reolink-motion-monitor:
     build:
       context: ..
-      dockerfile: examples/Dockerfile
+      dockerfile: app/Dockerfile
     container_name: reolink-motion-monitor
     restart: unless-stopped
 
@@ -15,8 +15,8 @@ services:
     # Mount recordings directory to persist downloads
     # Mount current directory to allow easy touchfile creation from host
     volumes:
-      - ./recordings:/app/examples/recordings
-      - .:/app/examples/host
+      - ./recordings:/app/recordings
+      - .:/app/host
       # Optional: Mount host root filesystem read-only (Linux only)
       # Uncomment for production to monitor host disk space
       # - /:/host:ro
