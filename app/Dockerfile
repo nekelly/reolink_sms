@@ -10,7 +10,7 @@ RUN apt-get update && \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the entire project into /build
-COPY .. /build
+COPY . /build
 
 # Install Python dependencies from root
 RUN pip install --no-cache-dir -r /build/requirements.txt
@@ -19,7 +19,7 @@ RUN pip install --no-cache-dir -r /build/requirements.txt
 RUN pip install --no-cache-dir /build
 
 # Copy app files to /app
-COPY . /app/
+COPY app /app/
 
 # Create recordings directory
 RUN mkdir -p /app/recordings
