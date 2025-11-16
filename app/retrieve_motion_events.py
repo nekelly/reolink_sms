@@ -393,11 +393,19 @@ class MotionEventRetriever:
                     settings_copy["Alarm"]["enable"] = 1
                     _LOGGER.debug("Using 'Alarm' structure")
                 elif "MdAlarm" in settings_copy:
-                    settings_copy["MdAlarm"]["enable"] = 1
-                    _LOGGER.debug("Using 'MdAlarm' structure")
+                    # For MdAlarm, simplify to only essential fields to avoid param errors
+                    # Some cameras reject the full structure with scope/table
+                    minimal_settings = {
+                        "MdAlarm": {
+                            "channel": channel,
+                            "enable": 1
+                        }
+                    }
+                    _LOGGER.debug("Using simplified 'MdAlarm' structure")
+                    settings_copy = minimal_settings
 
                 body = [{"cmd": "SetAlarm", "action": 0, "param": settings_copy}]
-                _LOGGER.debug(f"Sending SetAlarm command: {body}")
+                _LOGGER.debug(f"Sending SetAlarm command with enable=1")
 
                 await self.host_obj.send_setting(body)
                 # Refresh settings to verify
