@@ -42,6 +42,7 @@ log = logging.getLogger(__name__)
 logging.getLogger('twilio.http_client').setLevel(logging.WARNING)
 
 # Suppress Baichuan error logging (connection errors are normal)
+logging.getLogger('reolink_aio.baichuan.baichuan').setLevel(logging.CRITICAL)
 logging.getLogger('reolink_aio.baichuan').setLevel(logging.CRITICAL)
 
 
