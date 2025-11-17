@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 Retrieve motion events from Reolink camera.
 
@@ -7,6 +8,7 @@ using both real-time monitoring and historical recording search.
 
 Configuration is loaded from a .env file.
 """
+__version__ = "0.1"
 
 import asyncio
 import logging
@@ -360,14 +362,6 @@ class MotionEventRetriever:
             if wifi_signal and wifi_signal < 50:
                 log.warning(f"Weak WiFi signal ({wifi_signal}%) may cause connection issues")
 
-    async def check_motion_detection_enabled(self, channel: int):
-        """Check if motion detection is enabled on the channel"""
-        # Check if motion detection settings exist
-        if not hasattr(self.host_obj, '_md_alarm_settings') or channel not in self.host_obj._md_alarm_settings:
-            log.warning(f"Motion detection settings not available for channel {channel}")
-            log.info("This may be a camera that uses PIR detection instead")
-            return False
-
         # Check if motion detection is enabled
         md_settings = self.host_obj._md_alarm_settings[channel]
         if "Alarm" in md_settings:
@@ -415,22 +409,6 @@ class MotionEventRetriever:
         log.info(f"Motion sensitivity level: {sensitivity}")
         return True
 
-    async def check_recording_enabled(self, channel: int):
-        """Check if recording is enabled on the channel"""
-        try:
-            is_enabled = self.host_obj.recording_enabled(channel)
-        except (KeyError, AttributeError) as e:
-            log.warning(f"Unable to determine recording status for channel {channel}: {e}")
-            log.info("Recording status check skipped - will assume it's enabled")
-            return True  # Assume enabled to continue with the script
-
-        if not is_enabled:
-            log.warning(f"Recording is DISABLED on channel {channel}")
-            return False
-
-        log.info(f"Recording is enabled on channel {channel}")
-        return True
-
     async def monitor_realtime(self, duration_seconds: int, channel: int = 0):
         """Monitor real-time motion events via Baichuan TCP"""
         if duration_seconds == 0:
@@ -438,7 +416,7 @@ class MotionEventRetriever:
             log.info("Press Ctrl+C to stop")
         else:
             log.info(f"Starting real-time event monitoring for {duration_seconds} seconds...")
-        log.info("Note: Connection errors are normal - the library automatically reconnects")
+        # log.info("Note: Connection errors are normal - the library automatically reconnects")
 
         def event_callback():
             """Called when any event occurs"""
@@ -458,7 +436,7 @@ class MotionEventRetriever:
             log.debug(f"Motion state: was={was_motion}, now={motion_now}")
 
             if motion_now and not was_motion:
-                log.info(f"[{timestamp}] ⚡ MOTION STARTED on channel {channel}")
+                log.info(f"⚡ MOTION STARTED on channel {channel}")
                 self.motion_events.append({
                     'timestamp': timestamp,
                     'channel': channel,
@@ -481,7 +459,7 @@ class MotionEventRetriever:
                     log.debug("SMS task scheduled")
 
             elif not motion_now and was_motion:
-                log.info(f"[{timestamp}] ✓ MOTION ENDED on channel {channel}")
+                log.info(f"✓ MOTION ENDED on channel {channel}")
                 self.motion_events.append({
                     'timestamp': timestamp,
                     'channel': channel,
@@ -774,44 +752,6 @@ async def main():
     try:
         # Setup connection
         await retriever.setup()
-
-        """
-        # Check camera settings
-        log.info("\n" + "=" * 60)
-        log.info("Camera Settings Check")
-        log.info("=" * 60)
-        await retriever.check_motion_detection_enabled(channel)
-        await retriever.check_recording_enabled(channel)
-
-        # Get recording calendar
-        log.info("\n" + "=" * 60)
-        log.info("Recording Calendar")
-        log.info("=" * 60)
-        await retriever.get_recording_calendar(channel, months=3)
-
-        # Get historical recordings
-        log.info("\n" + "=" * 60)
-        log.info(f"Historical Recordings (Last {history_hours} hours)")
-        log.info("=" * 60)
-        vod_files = await retriever.get_historical_recordings(
-            channel=channel,
-            hours=history_hours,
-            trigger_filter=VOD_trigger.MOTION | VOD_trigger.PERSON | VOD_trigger.VEHICLE
-        )
-
-        # Download recordings if enabled
-        if download_recordings and vod_files:
-            log.info("\n" + "=" * 60)
-            log.info("Downloading Recordings")
-            log.info("=" * 60)
-
-            # Limit downloads to avoid filling disk
-            max_downloads = 5
-            log.info(f"Downloading up to {max_downloads} recordings...")
-
-            for vod_file in vod_files[:max_downloads]:
-                await retriever.download_recording(channel, vod_file, download_path)
-        """
 
         # Monitor real-time events
         log.info("\n" + "=" * 60)
