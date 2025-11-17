@@ -775,6 +775,7 @@ async def main():
         # Setup connection
         await retriever.setup()
 
+        """
         # Check camera settings
         log.info("\n" + "=" * 60)
         log.info("Camera Settings Check")
@@ -810,6 +811,7 @@ async def main():
 
             for vod_file in vod_files[:max_downloads]:
                 await retriever.download_recording(channel, vod_file, download_path)
+        """
 
         # Monitor real-time events
         log.info("\n" + "=" * 60)
@@ -824,7 +826,7 @@ async def main():
         log.info("\n" + "=" * 60)
         log.info("Summary")
         log.info("=" * 60)
-        log.info(f"Historical recordings found: {len(vod_files)}")
+        #log.info(f"Historical recordings found: {len(vod_files)}")
         log.info(f"Real-time events detected: {len(events)}")
 
         if events:
