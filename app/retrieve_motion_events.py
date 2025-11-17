@@ -20,6 +20,18 @@ from time import time as get_time
 # Add parent directory to path for local development
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Setup logging BEFORE importing reolink_aio
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+log = logging.getLogger(__name__)
+
+# Suppress verbose logging BEFORE imports so loggers inherit these settings
+logging.getLogger('twilio.http_client').setLevel(logging.WARNING)
+logging.getLogger('reolink_aio.baichuan.baichuan').setLevel(logging.CRITICAL)
+logging.getLogger('reolink_aio.baichuan').setLevel(logging.CRITICAL)
+
 from reolink_aio.api import Host
 from reolink_aio.typings import VOD_trigger
 
@@ -30,20 +42,6 @@ try:
 except ImportError:
     TWILIO_AVAILABLE = False
     TwilioClient = None
-
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-log = logging.getLogger(__name__)
-
-# Suppress verbose Twilio HTTP logging (only show on errors)
-logging.getLogger('twilio.http_client').setLevel(logging.WARNING)
-
-# Suppress Baichuan error logging (connection errors are normal)
-logging.getLogger('reolink_aio.baichuan.baichuan').setLevel(logging.CRITICAL)
-logging.getLogger('reolink_aio.baichuan').setLevel(logging.CRITICAL)
 
 
 def load_env():
