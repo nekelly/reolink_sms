@@ -3,9 +3,7 @@
 """
 Retrieve motion events from Reolink camera.
 
-This script demonstrates how to retrieve motion events from a Reolink camera
-using both real-time monitoring and historical recording search.
-
+Retrieve motion events from a Reolink camera and send an SMS via Twilio
 Configuration is loaded from a .env file.
 """
 __version__ = "0.1"
@@ -60,9 +58,6 @@ def load_env():
         log.info("CAMERA_PORT=80")
         log.info("CAMERA_CHANNEL=0")
         log.info("MONITOR_DURATION=300  # seconds to monitor for real-time events")
-        log.info("HISTORY_HOURS=24      # hours to search for historical recordings")
-        log.info("DOWNLOAD_RECORDINGS=false  # whether to download recordings")
-        log.info("DOWNLOAD_PATH=./recordings  # where to save downloaded recordings")
         sys.exit(1)
 
     config = {}
@@ -495,119 +490,6 @@ class MotionEventRetriever:
 
         return self.motion_events
 
-    async def get_historical_recordings(
-        self,
-        channel: int,
-        hours: int,
-        trigger_filter: VOD_trigger = VOD_trigger.MOTION
-    ):
-        """Get historical motion recordings"""
-        end = datetime.now()
-        start = end - timedelta(hours=hours)
-
-        log.info(f"Searching for recordings from {start.strftime('%Y-%m-%d %H:%M:%S')} "
-                    f"to {end.strftime('%Y-%m-%d %H:%M:%S')}")
-        log.info(f"Filter: {trigger_filter}")
-
-        try:
-            status_list, vod_files = await self.host_obj.request_vod_files(
-                channel=channel,
-                start=start,
-                end=end,
-                trigger=trigger_filter
-            )
-        except Exception as e:
-            log.error(f"Error searching recordings: {e}")
-            return []
-
-        log.info(f"Found {len(vod_files)} recordings")
-
-        # Log details about each recording
-        for i, vod_file in enumerate(vod_files, 1):
-            log.info(f"\nRecording #{i}:")
-            log.info(f"  Start: {vod_file.start_time}")
-            log.info(f"  End: {vod_file.end_time}")
-            log.info(f"  Duration: {vod_file.duration}")
-            log.info(f"  Size: {vod_file.size:,} bytes ({vod_file.size / 1024 / 1024:.2f} MB)")
-            log.info(f"  Stream: {vod_file.type}")
-            log.info(f"  Filename: {vod_file.file_name}")
-
-            if vod_file.bc_triggers:
-                triggers = []
-                if VOD_trigger.MOTION in vod_file.bc_triggers:
-                    triggers.append("Motion")
-                if VOD_trigger.PERSON in vod_file.bc_triggers:
-                    triggers.append("Person")
-                if VOD_trigger.VEHICLE in vod_file.bc_triggers:
-                    triggers.append("Vehicle")
-                if VOD_trigger.ANIMAL in vod_file.bc_triggers:
-                    triggers.append("Animal")
-                if VOD_trigger.PACKAGE in vod_file.bc_triggers:
-                    triggers.append("Package")
-                if VOD_trigger.DOORBELL in vod_file.bc_triggers:
-                    triggers.append("Doorbell")
-
-                log.info(f"  Triggers: {', '.join(triggers)}")
-
-        return vod_files
-
-    async def download_recording(self, channel: int, vod_file, output_dir: Path):
-        """Download a single recording"""
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        # Create filename from timestamp and triggers
-        timestamp_str = vod_file.start_time.strftime('%Y%m%d_%H%M%S')
-
-        trigger_str = "recording"
-        if vod_file.bc_triggers:
-            if VOD_trigger.MOTION in vod_file.bc_triggers:
-                trigger_str = "motion"
-            if VOD_trigger.PERSON in vod_file.bc_triggers:
-                trigger_str = "person"
-            if VOD_trigger.VEHICLE in vod_file.bc_triggers:
-                trigger_str = "vehicle"
-
-        filename = f"{timestamp_str}_{trigger_str}_ch{channel}.mp4"
-        output_path = output_dir / filename
-
-        log.info(f"Downloading to {output_path}...")
-
-        try:
-            await self.host_obj.download_vod_file(
-                channel=channel,
-                filename=vod_file.file_name,
-                output_path=str(output_path)
-            )
-            log.info(f"✓ Downloaded: {output_path}")
-            return output_path
-        except Exception as e:
-            log.error(f"✗ Failed to download: {e}")
-            return None
-
-    async def get_recording_calendar(self, channel: int, months: int = 3):
-        """Get a calendar view of which days have recordings"""
-        end = datetime.now()
-        start = end - timedelta(days=months * 31)  # Approximate
-
-        log.info(f"Getting recording calendar for last {months} months...")
-
-        try:
-            status_list, _ = await self.host_obj.request_vod_files(
-                channel=channel,
-                start=start,
-                end=end,
-                status_only=True  # Fast, only returns calendar data
-            )
-        except Exception as e:
-            log.error(f"Error getting calendar: {e}")
-            return
-
-        log.info("\nRecording Calendar:")
-        for status in status_list:
-            if len(status.days) > 0:
-                log.info(f"{status.year}-{status.month:02d}: {len(status.days)} days with recordings")
-                log.info(f"  Days: {', '.join(str(d) for d in status.days)}")
-
     async def cleanup(self):
         """Cleanup connection"""
         log.info("Disconnecting from camera...")
@@ -643,8 +525,6 @@ async def main():
     channel = get_config_value(config, 'CAMERA_CHANNEL', 0, int)
     monitor_duration = get_config_value(config, 'MONITOR_DURATION', 300, int)
     history_hours = get_config_value(config, 'HISTORY_HOURS', 24, int)
-    download_recordings = get_config_value(config, 'DOWNLOAD_RECORDINGS', False, bool)
-    download_path = Path(get_config_value(config, 'DOWNLOAD_PATH', './recordings'))
     baichuan_log_level = get_config_value(config, 'BAICHUAN_LOG_LEVEL', 'CRITICAL', str).upper()
 
     # Twilio SMS configuration
@@ -712,7 +592,6 @@ async def main():
         log.info("\n" + "=" * 60)
         log.info("Summary")
         log.info("=" * 60)
-        #log.info(f"Historical recordings found: {len(vod_files)}")
         log.info(f"Real-time events detected: {len(events)}")
 
         if events:
