@@ -350,63 +350,7 @@ class MotionEventRetriever:
         log.info(f"Model: {self.host_obj.model}")
         log.info(f"Firmware: {self.host_obj.sw_version}")
         log.info(f"Channels: {self.host_obj.channels}")
-        log.info(f"Is NVR: {self.host_obj.is_nvr}")
 
-        # Get initial states
-        await self.host_obj.get_states()
-
-        # Check WiFi signal if applicable
-        if self.host_obj.wifi_connection:
-            wifi_signal = self.host_obj.wifi_signal()
-            log.info(f"WiFi signal strength: {wifi_signal}%")
-            if wifi_signal and wifi_signal < 50:
-                log.warning(f"Weak WiFi signal ({wifi_signal}%) may cause connection issues")
-
-        # Check if motion detection is enabled
-        md_settings = self.host_obj._md_alarm_settings[channel]
-        if "Alarm" in md_settings:
-            is_enabled = md_settings["Alarm"].get("enable", 0) == 1
-        elif "MdAlarm" in md_settings:
-            is_enabled = md_settings["MdAlarm"].get("enable", 0) == 1
-        else:
-            log.warning(f"Unknown motion detection settings structure for channel {channel}")
-            return False
-
-        if not is_enabled:
-            log.warning(f"Motion detection is DISABLED on channel {channel}")
-            log.info("Attempting to enable motion detection via API...")
-            log.debug(f"Current motion detection settings: {md_settings}")
-
-            try:
-                # Make a deep copy to avoid modifying cached settings
-                import copy
-                settings_copy = copy.deepcopy(md_settings)
-
-                # Handle both "Alarm" and "MdAlarm" structure variations
-                # We need to send the FULL structure back with enable=1
-                if "Alarm" in settings_copy:
-                    settings_copy["Alarm"]["enable"] = 1
-                    log.debug("Using 'Alarm' structure")
-                elif "MdAlarm" in settings_copy:
-                    # Add enable field to the MdAlarm object (keep all other fields)
-                    settings_copy["MdAlarm"]["enable"] = 1
-                    log.debug("Using 'MdAlarm' structure with full settings")
-
-                body = [{"cmd": "SetAlarm", "action": 0, "param": settings_copy}]
-                log.debug(f"Sending SetAlarm with enable=1 and complete structure")
-
-                await self.host_obj.send_setting(body)
-                # Refresh settings to verify
-                await self.host_obj.get_states()
-                log.info("✓ Motion detection enabled successfully")
-            except Exception as e:
-                log.error(f"Failed to enable motion detection: {e}")
-                log.warning("Please enable motion detection manually in camera settings")
-                return False
-
-        log.info(f"Motion detection is enabled on channel {channel}")
-        sensitivity = self.host_obj.md_sensitivity(channel)
-        log.info(f"Motion sensitivity level: {sensitivity}")
         return True
 
     async def monitor_realtime(self, duration_seconds: int, channel: int = 0):
