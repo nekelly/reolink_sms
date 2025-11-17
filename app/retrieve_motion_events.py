@@ -43,6 +43,9 @@ log = logging.getLogger(__name__)
 # Suppress verbose Twilio HTTP logging (only show on errors)
 logging.getLogger('twilio.http_client').setLevel(logging.WARNING)
 
+# Suppress Baichuan error logging (connection errors are normal)
+logging.getLogger('reolink_aio.baichuan.baichuan').setLevel(logging.CRITICAL)
+
 
 def load_env():
     """Load configuration from .env file"""
@@ -357,7 +360,6 @@ class MotionEventRetriever:
         """Monitor real-time motion events via Baichuan TCP"""
         if duration_seconds == 0:
             log.info("Starting INFINITE real-time event monitoring...")
-            log.info("Press Ctrl+C to stop")
         else:
             log.info(f"Starting real-time event monitoring for {duration_seconds} seconds...")
         # log.info("Note: Connection errors are normal - the library automatically reconnects")
