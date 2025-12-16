@@ -340,7 +340,7 @@ class MotionEventRetriever:
 
     async def setup(self):
         """Initialize connection and get camera info"""
-        log.info("Connecting to camera...")
+        log.info(f"Connecting to camera at {self.host_obj.host}:{self.host_obj.port}...")
         await self.host_obj.get_host_data()
 
         log.info(f"Connected to: {self.host_obj.nvr_name}")
