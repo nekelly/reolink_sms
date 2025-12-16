@@ -21,8 +21,5 @@ RUN pip install /build
 # Copy app files to /app
 COPY app /app/
 
-# Create recordings directory
-RUN mkdir -p /app/recordings
-
 # Run the motion event retrieval script
 CMD ["python", "retrieve_motion_events.py"]
