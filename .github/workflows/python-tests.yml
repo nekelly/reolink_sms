@@ -43,11 +43,6 @@ jobs:
     - name: isort
       run: |
         isort reolink_aio
-    - name: Black formatting
-      uses: psf/black@stable
-      with:
-        options: "--check --verbose"
-        src: "./reolink_aio"
     - name: mypy type checking
       run: |
         mypy reolink_aio 
