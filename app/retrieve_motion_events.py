@@ -368,6 +368,26 @@ class MotionEventRetriever:
                 log.debug("Checking motion_detected()...")
                 motion_now = self.host_obj.motion_detected(channel)
                 log.debug(f"motion_detected() returned: {motion_now}")
+
+                # Log detailed event information for diagnostics
+                ai_supported_types = []
+                ai_states = {}
+                try:
+                    ai_supported_types = self.host_obj.ai_supported_types(channel)
+                    if ai_supported_types:
+                        log.info(f"📊 AI supported types: {ai_supported_types}")
+                        for ai_type in ai_supported_types:
+                            ai_states[ai_type] = self.host_obj.ai_detected(channel, ai_type)
+
+                        # Log which AI types are currently detected
+                        active_ai = [ai_type for ai_type, detected in ai_states.items() if detected]
+                        if active_ai:
+                            log.info(f"🤖 AI detections active: {', '.join(active_ai)}")
+                        else:
+                            log.debug("No AI detections active")
+                except Exception as ai_err:
+                    log.debug(f"Could not check AI states: {ai_err}")
+
             except Exception as e:
                 log.error(f"Error checking motion state: {e}")
                 return
@@ -375,12 +395,27 @@ class MotionEventRetriever:
             was_motion = self.last_motion_state.get(channel, False)
             log.debug(f"Motion state: was={was_motion}, now={motion_now}")
 
+            # Log every state transition for diagnostics
+            if motion_now != was_motion:
+                log.info(f"🔄 Motion state changed: {was_motion} -> {motion_now}")
+
             if motion_now and not was_motion:
-                log.info(f"⚡ MOTION STARTED on channel {channel}")
+                # Build detailed event information
+                event_info = f"⚡ MOTION STARTED on channel {channel}"
+                if ai_states:
+                    active_ai = [ai_type for ai_type, detected in ai_states.items() if detected]
+                    if active_ai:
+                        event_info += f" (AI: {', '.join(active_ai)})"
+                    else:
+                        event_info += " (no AI detection)"
+
+                log.info(event_info)
+
                 self.motion_events.append({
                     'timestamp': timestamp,
                     'channel': channel,
-                    'type': 'motion_start'
+                    'type': 'motion_start',
+                    'ai_detected': ai_states if ai_states else {}
                 })
 
                 # Send SMS notification if enabled
@@ -392,6 +427,12 @@ class MotionEventRetriever:
                     sms_message = (
                         f"🚨 Motion detected on {camera_name} at {timestamp.strftime('%H:%M:%S')}"
                     )
+
+                    # Add AI detection info to SMS if available
+                    if ai_states:
+                        active_ai = [ai_type for ai_type, detected in ai_states.items() if detected]
+                        if active_ai:
+                            sms_message += f"\nAI: {', '.join(active_ai)}"
 
                     # Schedule async SMS send as a task to avoid blocking
                     log.debug("Scheduling SMS send task...")
